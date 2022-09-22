@@ -10,5 +10,9 @@ By using rs485 I can read the power from the metter and by doing this I can comp
 * Logs all the inverter info that can be accesed by the rs485 registers
 * By using the chint ddsu666 external metter, can compute and send the exported/purchased energy from the grid
 
-## Device:
+## Parts:
+* Esp8266 
+* 2x RS485 to TTL converter, in this case I am using two different boards but you can use two of the same type, you need two converters in order to read information from the inverter and from the external metter.
+
+## Prototype:
 ![](images/device.jpg)
