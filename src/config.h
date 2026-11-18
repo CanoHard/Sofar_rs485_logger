@@ -1,117 +1,79 @@
-#include <Arduino.h>
-#include <ArduinoOTA.h>
-#include <ESP8266WiFi.h>
-#include <WiFiUdp.h>
-#include <SoftwareSerial.h>
-#include <ModbusMaster.h>
-#include <CanoMqtt.h>
-#include <Chrono.h> 
-#include <EEPROM.h>
-#include <NTPClient.h>
+#pragma once
 // ---------- CONFIG ----------
+// The WiFi and the MQTT broker are set in the configuration portal (see README), not here.
+// The passwords of the portal and of the OTA updates are in secrets.h, which is not committed.
 
-// Set WiFi credentials
-#define WIFI_SSID "NAME"
-#define WIFI_PASS "PASSWORD"
+// ---------- Identity ----------
+#define DEVICE_NAME "Sofar"
+#define OTA_HOSTNAME "SOFAR-LOGGER"
+#define FIRMWARE_VERSION "2.1.0"
 
-#define NAME "SOFAR-LOGGER"
+// ---------- Configuration portal ----------
+#define PORTAL_SSID "SOFAR-LOGGER"  // Access point opened to configure the device
+#define PORTAL_TIMEOUT_S 600        // An on-demand portal closes itself after this long
+#define CONFIG_BUTTON_PIN 0         // BOOT button: hold it to open the portal
+#define CONFIG_BUTTON_HOLD_MS 3000
 
-// Buffer
-#define LEN 8           // Length of buffer for receiving 9
-#define LENR 8          // Length of buffer for outgoing packets
+// ---------- RS485 ports (Waveshare ESP32-S3-Relay-1CH) ----------
+// Onboard isolated RS485 (terminal block): UART on GPIO17/18, transmit enable on GPIO21
+#define ONBOARD_RS485_TX 17
+#define ONBOARD_RS485_RX 18
+#define ONBOARD_RS485_DE 21
+// External RS485 converter on connector J5 (IO1, IO2, 3V3, GND).
+// There is no direction pin on J5: the converter must switch direction automatically.
+#define EXTERNAL_RS485_TX 1 // To the DI/TXD input of the converter
+#define EXTERNAL_RS485_RX 2 // To the RO/RXD output of the converter
+#define EXTERNAL_RS485_DE -1
 
-int PINMAX = 14; // PIN for DE and RE
+// 1: inverter on the onboard port and DDSU666 on the external one. 0: the other way round.
+#define INVERTER_ON_ONBOARD_PORT 1
 
-#define MAX_EXPORT 5
-#define MAX_IMPORT 10
+#if INVERTER_ON_ONBOARD_PORT
+#define INVERTER_TX_PIN ONBOARD_RS485_TX
+#define INVERTER_RX_PIN ONBOARD_RS485_RX
+#define INVERTER_DE_PIN ONBOARD_RS485_DE
+#define DDSU_TX_PIN EXTERNAL_RS485_TX
+#define DDSU_RX_PIN EXTERNAL_RS485_RX
+#define DDSU_DE_PIN EXTERNAL_RS485_DE
+#else
+#define INVERTER_TX_PIN EXTERNAL_RS485_TX
+#define INVERTER_RX_PIN EXTERNAL_RS485_RX
+#define INVERTER_DE_PIN EXTERNAL_RS485_DE
+#define DDSU_TX_PIN ONBOARD_RS485_TX
+#define DDSU_RX_PIN ONBOARD_RS485_RX
+#define DDSU_DE_PIN ONBOARD_RS485_DE
+#endif
 
-#define MQTT_PORT 1883
-const char *broker_ip = "mosquitto.broker.ip";
-const char *mqtt_user = "admin";
-const char *mqtt_password = "1234";
+#define INVERTER_MODBUS_ID 0x01
 
-const char *topicddsu666 = "Sofar/ddsu666/RED_Potencia";
+// ---------- Grid meter (DDSU666) ----------
+#define MAX_EXPORT 5     // kW, readings above this are discarded
+#define MAX_IMPORT 10    // kW, readings above this are discarded
+#define DDSU_FRAME_LEN 9 // 01 03 04 + 4 bytes float + 2 bytes CRC
 
-const char *topic_grid_imported = "Sofar/ddsu666/imported";
-const char *topic_grid_exported = "Sofar/ddsu666/exported";
+// ---------- Periods (ms) ----------
+const unsigned long gridPollPeriod = 200;              // Request the power to the DDSU666
+const unsigned long gridPublishPeriod = 5000;          // Publish grid power and house consumption
+const unsigned long energyPublishPeriod = 15000;       // Publish imported/exported energy
+const unsigned long inverterPollPeriod = 5000;         // Read the inverter while it answers
+const unsigned long inverterOfflinePollPeriod = 30000; // Read the inverter while it does not answer (night)
+const unsigned long inverterBlockDelay = 500;          // Wait between the two reads of each inverter cycle
+const unsigned long inverterTimeout = 30000;           // Without answer for this long the inverter is taken as off
 
-// Topics send inverter state
-const char *topic_inverter_state = "Sofar/Logger/Estado_Inversor";
-const char *topic_pv1_voltage = "Sofar/Logger/PV1_Voltaje";
-const char *topic_pv1_current = "Sofar/Logger/PV1_Intensidad";
-const char *topic_pv1_power = "Sofar/Logger/PV1_Potencia";
-const char *topic_ac_voltage = "Sofar/Logger/AC_Voltaje";
-const char *topic_ac_current = "Sofar/Logger/AC_Intensidad";
-const char *topic_ac_power = "Sofar/Logger/AC_Potencia";
-const char *topic_ac_frequency = "Sofar/Logger/AC_Frecuencia";
-const char *topic_temp_ambient = "Sofar/Logger/Temp_ambiente";
-const char *topic_temp_radiator = "Sofar/Logger/Temp_radiador";
-const char *topic_fault_1 = "Sofar/Logger/topic_fault_1";
-const char *topic_fault_2 = "Sofar/Logger/topic_fault_2";
-const char *topic_fault_3 = "Sofar/Logger/topic_fault_3";
-const char *topic_fault_4 = "Sofar/Logger/topic_fault_4";
-const char *topic_fault_5 = "Sofar/Logger/topic_fault_5";
-const char *topic_fault_6 = "Sofar/Logger/topic_fault_6";
-const char *topic_fault_7 = "Sofar/Logger/topic_fault_7";
-const char *topic_fault_8 = "Sofar/Logger/topic_fault_8";
-const char *topic_fault_9 = "Sofar/Logger/topic_fault_9";
-const char *topic_fault_10 = "Sofar/Logger/topic_fault_10";
-const char *topic_fault_11 = "Sofar/Logger/topic_fault_11";
-const char *topic_fault_12 = "Sofar/Logger/topic_fault_12";
-const char *topic_fault_13 = "Sofar/Logger/topic_fault_13";
-const char *topic_fault_14 = "Sofar/Logger/topic_fault_14";
-const char *topic_fault_15 = "Sofar/Logger/topic_fault_15";
-const char *topic_fault_16 = "Sofar/Logger/topic_fault_16";
-const char *topic_fault_17 = "Sofar/Logger/topic_fault_17";
-const char *topic_fault_18 = "Sofar/Logger/topic_fault_18";
-const char *topic_generation_today = "Sofar/Logger/Prod_Hoy";
-const char *topic_generation_total = "Sofar/Logger/Prod_Total";
-const char *topic_logger_control = "Sofar/Logger/Control";
+// ---------- Connection watchdog ----------
+const unsigned long wifiRetryPeriod = 30000; // Ask the WiFi to reconnect this often while it is down
+const unsigned long restartAfter = 300000;   // Without MQTT for this long the ESP is restarted
 
-SoftwareSerial ss(12, 13); // Softwareserial object to be used for communicating with RS485 MAX MODULE (RX,TX)
-SoftwareSerial inverterdata(4, 5); // Softwareserial object to be used for communicating with RS485 MAX MODULE (RX,TX)
+// ---------- Total generation filter ----------
+#define MAX_TOTAL_STEP 2.0    // kWh, max plausible increase between two consecutive reads
+#define TOTAL_CONFIRM_BOOT 3  // Consistent reads needed to accept the first value after boot
+#define TOTAL_CONFIRM_JUMP 20 // Consistent reads needed to accept a decrease / big jump (~5 min)
 
+// ---------- Inverter faults ----------
+#define FAULT_REGISTERS 18   // Fault registers 0x0405..0x0416
+#define MAX_FAULTS_LISTED 20 // Max fault IDs written in the summary text
 
-const int period = 5000; // Period in milliseconds for sending data
-const int DataInverterPeriod = 5000; // Period in milliseconds for sending inverter data, 3*period = interval other data
-const int pullPeriod = 200; // Period in milliseconds for pulling data from ddsu666
-const int sendDataEnergyPeriod = 15000; // Period in milliseconds for sending data to ddsu666
-const int interval_between_pulls = 500; // Period in milliseconds for pulling data from different registers
-
-CanoMqtt mqttClient(WIFI_SSID, WIFI_PASS, broker_ip, mqtt_user, mqtt_password, NAME);
-// Instanciate a Chrono object.
-Chrono sendDataDDSU;
-Chrono sendDataEnergy;
-Chrono pullDataDDSU;
-Chrono sendDataInverter;
-Chrono betweenpulls;
-
-ModbusMaster node;                  //Instantiate modbus object
-
-int registerindex = 0; 
-// Energy
-
-unsigned long import_today = 0; // Import today
-unsigned long export_today = 0; // Export today
-
-unsigned long last_time = 0; // Last time data was sent
-float last_power = 0; // Last power
-
-//Ntp time
-WiFiUDP ntpUDP;
-
-// You can specify the time server pool and the offset, (in seconds)
-// additionally you can specify the update interval (in milliseconds).
-NTPClient timeClient(ntpUDP, "europe.pool.ntp.org", 3600, 60000);
-
-int last_day = 0; // Last day
-bool time_setchanged = false; // Time set changed
-// Prototype functions
-
-void Send_Udp_Packet(IPAddress ip);
-void OnWifiConnect();
-void OnWifiDisconect();
-void SendInverterData();
-void Transmit_Rs485_Packet(char *packet, int len);
-void OnMqttConnect();
-void OnMqttMessage(char *topic, char *payload, AsyncMqttClientMessageProperties properties, size_t len, size_t index, size_t total);
+// ---------- Time ----------
+// Used to reset the daily counters at local midnight (POSIX TZ string, this one is Spain mainland)
+#define TIMEZONE "CET-1CEST,M3.5.0,M10.5.0/3"
+#define NTP_SERVER "europe.pool.ntp.org"
