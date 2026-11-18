@@ -59,6 +59,8 @@ const unsigned long inverterPollPeriod = 5000;         // Read the inverter whil
 const unsigned long inverterOfflinePollPeriod = 30000; // Read the inverter while it does not answer (night)
 const unsigned long inverterBlockDelay = 500;          // Wait between the two reads of each inverter cycle
 const unsigned long inverterTimeout = 30000;           // Without answer for this long the inverter is taken as off
+const unsigned long inverterInfoPeriod = 3600000;       // Read the serial number and firmware versions
+const unsigned long diagnosticsPeriod = 60000;          // Publish WiFi signal, uptime and IP
 
 // ---------- Connection watchdog ----------
 const unsigned long wifiRetryPeriod = 30000; // Ask the WiFi to reconnect this often while it is down
@@ -71,7 +73,6 @@ const unsigned long restartAfter = 300000;   // Without MQTT for this long the E
 
 // ---------- Inverter faults ----------
 #define FAULT_REGISTERS 18   // Fault registers 0x0405..0x0416
-#define MAX_FAULTS_LISTED 20 // Max fault IDs written in the summary text
 
 // ---------- Time ----------
 // Used to reset the daily counters at local midnight (POSIX TZ string, this one is Spain mainland)

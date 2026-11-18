@@ -12,12 +12,14 @@
 #include <entities/HaEntityCurrent.h>
 #include <entities/HaEntityEnergy.h>
 #include <entities/HaEntityPower.h>
+#include <entities/HaEntitySignalStrength.h>
 #include <entities/HaEntitySensor.h>
 #include <entities/HaEntityString.h>
 #include <entities/HaEntityTemperature.h>
 #include <entities/HaEntityVoltage.h>
 
 #include "config.h"
+#include "faults.h"
 #include "secrets.h"
 #include "settings.h"
 
@@ -52,6 +54,15 @@ static MQTTRemote::Configuration MqttConfiguration()
 
 using PowerUnit = HaEntityPower::Unit;
 homeassistantentities::Sensor::Frequency frequency_class;
+homeassistantentities::Sensor::Duration duration_class;
+homeassistantentities::Sensor::PowerFactor power_factor_class;
+homeassistantentities::Sensor::ReactivePower reactive_power_class;
+homeassistantentities::Sensor::Current current_class;
+homeassistantentities::Sensor::Voltage voltage_class;
+homeassistantentities::Sensor::Undefined::Empty no_class;
+using DurationUnit = homeassistantentities::Sensor::Duration::Unit;
+using CurrentUnit = homeassistantentities::Sensor::Current::Unit;
+using VoltageUnit = homeassistantentities::Sensor::Voltage::Unit;
 
 struct HomeAssistant
 {
@@ -80,6 +91,68 @@ struct HomeAssistant
   HaEntityEnergy generation_today{bridge, "Producción hoy", "generation_today"};
   HaEntityEnergy generation_total{bridge, "Producción total", "generation_total"};
   HaEntityString faults{bridge, "Errores", "faults", {.icon = "mdi:alert-circle-outline"}};
+  HaEntitySensor reactive_power{bridge, "Potencia reactiva", "reactive",
+                                {.device_class = reactive_power_class,
+                                 .unit_of_measurement = homeassistantentities::Sensor::ReactivePower::Unit::kvar,
+                                 .suggested_display_precision = 2}};
+  HaEntitySensor power_factor{bridge, "Factor de potencia", "power_factor",
+                              {.device_class = power_factor_class,
+                               .unit_of_measurement = homeassistantentities::Sensor::PowerFactor::Unit::None,
+                               .suggested_display_precision = 3}};
+  HaEntityTemperature temp_module{bridge, "Temperatura módulo", "module"};
+  HaEntitySensor generation_time_today{bridge, "Tiempo de producción hoy", "generation_time_today",
+                                       {.device_class = duration_class,
+                                        .unit_of_measurement = DurationUnit::min,
+                                        .state_class = "total_increasing"}};
+  HaEntitySensor generation_time_total{bridge, "Tiempo de producción total", "generation_time_total",
+                                       {.device_class = duration_class,
+                                        .unit_of_measurement = DurationUnit::h,
+                                        .state_class = "total_increasing",
+                                        .entity_category = "diagnostic",
+                                        .suggested_display_precision = 0}};
+  HaEntitySensor service_time_total{bridge, "Tiempo de funcionamiento total", "service_time_total",
+                                    {.device_class = duration_class,
+                                     .unit_of_measurement = DurationUnit::h,
+                                     .state_class = "total_increasing",
+                                     .entity_category = "diagnostic",
+                                     .suggested_display_precision = 0}};
+  HaEntitySensor insulation{bridge, "Resistencia de aislamiento", "insulation",
+                            {.device_class = no_class,
+                             .icon = "mdi:omega",
+                             .custom_unit_of_measurement = "kΩ",
+                             .entity_category = "diagnostic"}};
+  HaEntitySensor leakage_current{bridge, "Corriente de fuga", "leakage",
+                                 {.device_class = current_class,
+                                  .unit_of_measurement = CurrentUnit::mA,
+                                  .entity_category = "diagnostic"}};
+  HaEntitySensor bus_voltage{bridge, "Tensión bus DC", "bus",
+                             {.device_class = voltage_class,
+                              .unit_of_measurement = VoltageUnit::V,
+                              .entity_category = "diagnostic"}};
+
+  // Inverter information (read once and every hour)
+  HaEntityString inverter_serial{bridge, "Número de serie inversor", "inverter_serial",
+                                 {.icon = "mdi:barcode", .entity_category = "diagnostic"}};
+  HaEntityString inverter_hardware{bridge, "Versión hardware inversor", "inverter_hardware",
+                                   {.icon = "mdi:chip", .entity_category = "diagnostic"}};
+  HaEntityString inverter_fw_com{bridge, "Firmware comunicaciones", "inverter_fw_com",
+                                 {.icon = "mdi:memory", .entity_category = "diagnostic"}};
+  HaEntityString inverter_fw_master{bridge, "Firmware control principal", "inverter_fw_master",
+                                    {.icon = "mdi:memory", .entity_category = "diagnostic"}};
+  HaEntityString inverter_fw_slave{bridge, "Firmware control secundario", "inverter_fw_slave",
+                                   {.icon = "mdi:memory", .entity_category = "diagnostic"}};
+  HaEntityString inverter_safety{bridge, "Versión normativa de red", "inverter_safety",
+                                 {.icon = "mdi:shield-check-outline", .entity_category = "diagnostic"}};
+
+  // Logger
+  HaEntitySignalStrength wifi_signal{bridge, "Señal WiFi", "wifi", {.entity_category = "diagnostic"}};
+  HaEntitySensor uptime{bridge, "Tiempo encendido", "uptime",
+                        {.device_class = duration_class,
+                         .unit_of_measurement = DurationUnit::h,
+                         .state_class = std::nullopt,
+                         .entity_category = "diagnostic",
+                         .suggested_display_precision = 1}};
+  HaEntityString ip_address{bridge, "Dirección IP", "ip", {.icon = "mdi:ip-network", .entity_category = "diagnostic"}};
 
   // Controls
   HaEntityButton restart{bridge, "Reiniciar", "restart",
@@ -100,10 +173,20 @@ struct HomeAssistant
     HaEntity *const entities[] = {
         &grid_power, &house_power, &imported, &exported, &inverter_state, &ac_power, &ac_voltage,
         &ac_current, &ac_frequency, &pv1_power, &pv1_voltage, &pv1_current, &temp_ambient, &temp_radiator,
-        &generation_today, &generation_total, &faults, &restart, &reset_counters, &config_portal};
+        &generation_today, &generation_total, &faults, &reactive_power, &power_factor, &temp_module,
+        &generation_time_today, &generation_time_total, &service_time_total, &insulation, &leakage_current,
+        &bus_voltage, &inverter_serial, &inverter_hardware, &inverter_fw_com, &inverter_fw_master,
+        &inverter_fw_slave, &inverter_safety, &wifi_signal, &uptime, &ip_address, &restart, &reset_counters,
+        &config_portal};
     for (HaEntity *entity : entities)
     {
       entity->publishConfiguration();
+    }
+    // Send the last known values again, so Home Assistant does not wait for the next reading
+    // (the inverter information is only read once an hour)
+    for (HaEntity *entity : entities)
+    {
+      entity->republishState();
     }
   }
 };
@@ -332,11 +415,25 @@ bool FilterGenerationTotal(float value)
   return false;
 }
 
+// Signed 16 bit register (I16 in the protocol)
+static int16_t RegI16(uint8_t index)
+{
+  return (int16_t)node.getResponseBuffer(index);
+}
+
+// Unsigned 32 bit value in two registers, high word first (U32 in the protocol)
+static uint32_t RegU32(uint8_t index)
+{
+  return ((uint32_t)node.getResponseBuffer(index) << 16) | node.getResponseBuffer(index + 1);
+}
+
 // Publishes the fault registers of the block 0x0400 that has just been read as a text.
-// Each register is a bit field: bit n of register r is the fault ID (r * 16 + n + 1).
+// Each register is a bit field: bit n of register r is the fault ID (r * 16 + n + 1),
+// described in the sheet "Fault Addresses" of the protocol (faults.h).
 void PublishInverterFaults()
 {
-  char summary[200] = "";
+  static const size_t maxLength = 240; // Home Assistant drops states longer than 255 characters
+  std::string summary;
   int active = 0;
   int listed = 0;
 
@@ -345,34 +442,37 @@ void PublishInverterFaults()
     uint16_t value = node.getResponseBuffer(0x0005 + i);
     for (int bit = 0; bit < 16; bit++)
     {
-      if (value & (1 << bit))
+      if (!(value & (1 << bit)))
       {
-        active++;
-        if (listed < MAX_FAULTS_LISTED)
-        {
-          size_t used = strlen(summary);
-          snprintf(summary + used, sizeof(summary) - used, "%sID%03d", listed ? ", " : "", i * 16 + bit + 1);
-          listed++;
-        }
+        continue;
+      }
+      active++;
+      int id = i * 16 + bit + 1;
+      char item[80];
+      const char *name = FAULT_NAMES[id - 1];
+      snprintf(item, sizeof(item), "%sID%03d%s%s", listed ? ", " : "", id, name ? " " : "", name ? name : "");
+      if (summary.size() + strlen(item) <= maxLength - 8) // Room left for " (+NN)"
+      {
+        summary += item;
+        listed++;
       }
     }
   }
   if (active > listed)
   {
-    size_t used = strlen(summary);
-    snprintf(summary + used, sizeof(summary) - used, " (+%d)", active - listed);
+    summary += " (+" + std::to_string(active - listed) + ")";
   }
   ha->faults.publish(active ? summary : "Sin errores");
 }
 
 void ReadInverterLive() // 0x0480: AC output
 {
-  if (!ReadInverterBlock(0x0480, 0x000F))
+  if (!ReadInverterBlock(0x0480, 0x0012)) // 0x0480..0x0491
   {
     return;
   }
   float freq = node.getResponseBuffer(0x0004) * 0.01;
-  float powerac = node.getResponseBuffer(0x0005) * 0.01;
+  float powerac = RegI16(0x0005) * 0.01; // I16: slightly negative while the inverter is idle
   float voltageac = node.getResponseBuffer(0x000D) * 0.1;
   float currentac = node.getResponseBuffer(0x000E) * 0.01;
 
@@ -382,6 +482,11 @@ void ReadInverterLive() // 0x0480: AC output
 
   ha->ac_power.publish(powerac);
   ha->ac_current.publish(currentac);
+  ha->reactive_power.publish(RegI16(0x0006) * 0.01); // 0x0486
+  if (powerac > 0)
+  {
+    ha->power_factor.publish(RegI16(0x0011) * 0.001); // 0x0491, meaningless without output
+  }
   if (freq > 0)
   {
     ha->ac_frequency.publish(freq);
@@ -394,29 +499,56 @@ void ReadInverterLive() // 0x0480: AC output
 
 void ReadInverterStatus() // 0x0400: state, faults and temperatures
 {
-  if (!ReadInverterBlock(0x0400, 0x001B))
+  if (!ReadInverterBlock(0x0400, 0x002C)) // 0x0400..0x042B
   {
     return;
   }
-  static const char *const states[] = {"Inactivo", "Verificando red", "Normal", "Suministro de emergencia",
-                                       "Error", "Fallo permanente en el sistema", "Actualizando sistema", "Autocarga"};
+  static const char *const states[] = {"Esperando",
+                                       "Comprobando",
+                                       "Conectado a red",
+                                       "Suministro de emergencia",
+                                       "Fallo recuperable",
+                                       "Fallo permanente",
+                                       "Actualizando",
+                                       "Autocarga",
+                                       "Modo SVG",
+                                       "Modo PID"};
   uint16_t state = node.getResponseBuffer(0x0004);
   if (state < sizeof(states) / sizeof(states[0]))
   {
     ha->inverter_state.publish(states[state]);
   }
+  else
+  {
+    ha->inverter_state.publish("Desconocido (" + std::to_string(state) + ")");
+  }
 
   PublishInverterFaults();
 
-  int tempamb = node.getResponseBuffer(0x0018);
-  int temprad = node.getResponseBuffer(0x001A);
-  if (tempamb > 0)
+  // I16: they can be below zero. 0 is what the inverter reports while the sensor is not ready
+  int16_t tempamb = RegI16(0x0018);
+  int16_t temprad = RegI16(0x001A);
+  if (tempamb != 0)
   {
     ha->temp_ambient.publish(tempamb);
   }
-  if (temprad > 0)
+  if (temprad != 0)
   {
     ha->temp_radiator.publish(temprad);
+  }
+  int16_t tempmodule = RegI16(0x0020);
+  if (tempmodule != 0)
+  {
+    ha->temp_module.publish(tempmodule);
+  }
+
+  ha->generation_time_today.publish(node.getResponseBuffer(0x0026));  // Minutes
+  ha->generation_time_total.publish(RegU32(0x0027) / 60.0);            // Minutes -> hours
+  ha->service_time_total.publish(RegU32(0x0029) / 60.0);               // Minutes -> hours
+  uint16_t insulation = node.getResponseBuffer(0x002B);
+  if (insulation > 0)
+  {
+    ha->insulation.publish(insulation);
   }
 }
 
@@ -444,8 +576,10 @@ void ReadInverterGeneration() // 0x0680: energy counters
   {
     return;
   }
-  float generationtoday = node.getResponseBuffer(0x0005) * 0.01;
-  float generationtotal = node.getResponseBuffer(0x0007) * 0.1;
+  // Both are U32 (0x0684-0x0685 and 0x0686-0x0687). Reading only the low word made the total
+  // wrap around at 6553.5 kWh
+  float generationtoday = RegU32(0x0004) * 0.01;
+  float generationtotal = RegU32(0x0006) * 0.1;
   // If the total is not trustworthy the whole frame is suspect: publish nothing
   if (FilterGenerationTotal(generationtotal))
   {
@@ -454,13 +588,73 @@ void ReadInverterGeneration() // 0x0680: energy counters
   }
 }
 
-// Every cycle reads the AC output and, a moment later, one of the other three blocks in turn.
+void ReadInverterDiagnostics() // 0x06C4..0x06CC: leakage current and DC bus (installer level registers)
+{
+  if (!ReadInverterBlock(0x06C4, 0x0009))
+  {
+    return;
+  }
+  ha->leakage_current.publish(node.getResponseBuffer(0x0000));    // 0x06C4, mA
+  ha->bus_voltage.publish(node.getResponseBuffer(0x0008) * 0.1);  // 0x06CC
+}
+
+// Text stored as two ASCII characters per register, high byte first
+static std::string RegAscii(uint8_t index, uint8_t count)
+{
+  std::string out;
+  for (uint8_t i = 0; i < count; i++)
+  {
+    uint16_t value = node.getResponseBuffer(index + i);
+    for (char c : {(char)(value >> 8), (char)(value & 0xFF)})
+    {
+      if (c >= 0x20 && c < 0x7F)
+      {
+        out += c;
+      }
+    }
+  }
+  // Trim the padding
+  size_t end = out.find_last_not_of(' ');
+  return end == std::string::npos ? "" : out.substr(0, end + 1);
+}
+
+// Software version: stage letter (low byte of the first register) + major + custom + minor (two digits each),
+// e.g. "V050001"
+static std::string RegVersion(uint8_t index)
+{
+  char stage = node.getResponseBuffer(index) & 0xFF;
+  std::string version = (stage >= 0x20 && stage < 0x7F) ? std::string(1, stage) : "";
+  return version + RegAscii(index + 1, 3);
+}
+
+// 0x0440..0x0471: serial number and versions. They do not change, so it is read rarely.
+bool ReadInverterInfo()
+{
+  if (!ReadInverterBlock(0x0440, 0x0032))
+  {
+    return false;
+  }
+  std::string serial = RegAscii(0x0005, 8) + RegAscii(0x0030, 2); // 0x0445..0x044C + 0x0470..0x0471
+  ha->inverter_serial.publish(serial);
+  ha->inverter_hardware.publish(RegAscii(0x000D, 2));  // 0x044D..0x044E
+  ha->inverter_fw_com.publish(RegVersion(0x000F));     // 0x044F..0x0452
+  ha->inverter_fw_master.publish(RegVersion(0x0013));  // 0x0453..0x0456
+  ha->inverter_fw_slave.publish(RegVersion(0x0017));   // 0x0457..0x045A
+  char safety[16];
+  snprintf(safety, sizeof(safety), "%u.%u", node.getResponseBuffer(0x001B), node.getResponseBuffer(0x001C));
+  ha->inverter_safety.publish(safety); // 0x045B..0x045C
+  return true;
+}
+
+// Every cycle reads the AC output and, a moment later, one of the other blocks in turn.
 void HandleInverter()
 {
   static unsigned long lastCycle = 0;
   static unsigned long cycleStart = 0;
   static bool secondPending = false;
   static int block = 0;
+  static unsigned long lastInfo = 0;
+  static bool haveInfo = false;
 
   if (every(lastCycle, inverter_online ? inverterPollPeriod : inverterOfflinePollPeriod))
   {
@@ -472,6 +666,16 @@ void HandleInverter()
   if (secondPending && millis() - cycleStart >= inverterBlockDelay)
   {
     secondPending = false;
+    // On failure it is retried after a few minutes, so the other blocks keep being read
+    static bool triedInfo = false;
+    if (!triedInfo || millis() - lastInfo > (haveInfo ? inverterInfoPeriod : 300000UL))
+    {
+      triedInfo = true;
+      // Takes the place of the regular block in this cycle
+      haveInfo = ReadInverterInfo();
+      lastInfo = millis();
+      return;
+    }
     switch (block)
     {
     case 0:
@@ -480,11 +684,14 @@ void HandleInverter()
     case 1:
       ReadInverterPv();
       break;
-    default:
+    case 2:
       ReadInverterGeneration();
       break;
+    default:
+      ReadInverterDiagnostics();
+      break;
     }
-    block = (block + 1) % 3;
+    block = (block + 1) % 4;
   }
 
   // The inverter switches off at night: show it instead of keeping the last values
@@ -594,6 +801,14 @@ void HandleNetwork()
   if (mqttStarted && ha->mqtt.connected() && discovery_pending.exchange(false))
   {
     ha->publishDiscovery();
+  }
+
+  static unsigned long lastDiagnostics = 0;
+  if (WiFi.isConnected() && every(lastDiagnostics, diagnosticsPeriod))
+  {
+    ha->wifi_signal.publish(WiFi.RSSI());
+    ha->uptime.publish(millis() / 3600000.0);
+    ha->ip_address.publish(WiFi.localIP().toString().c_str());
   }
 }
 
