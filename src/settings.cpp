@@ -2,10 +2,19 @@
 
 #include <Arduino.h>
 #include <Preferences.h>
+#include <Update.h>
 #include <WiFiManager.h>
 
 #include "config.h"
 #include "secrets.h"
+
+// Credentials of the web pages (both on the access point and on the home network)
+#ifndef WEB_USER
+#define WEB_USER "admin"
+#endif
+#ifndef WEB_PASSWORD
+#define WEB_PASSWORD PORTAL_PASSWORD
+#endif
 
 Settings settings;
 
@@ -181,6 +190,98 @@ static void OnParamsSaved()
   saved = true;
 }
 
+// ---------- Web server: password and firmware update ----------
+static bool Authorized(WebServer &server)
+{
+  return server.authenticate(WEB_USER, WEB_PASSWORD);
+}
+
+static bool updateAuthorized = false;
+static bool updateOk = false;
+
+// Firmware upload. The WebServer receives the file before running the middlewares, so the
+// password check below does not protect it: it is checked again when the upload starts.
+static void HandleFirmwareUpload()
+{
+  WebServer &server = *wm.server;
+  HTTPUpload &upload = server.upload();
+  switch (upload.status)
+  {
+  case UPLOAD_FILE_START:
+    updateOk = false;
+    updateAuthorized = Authorized(server);
+    if (!updateAuthorized)
+    {
+      Serial.println("Firmware upload rejected: wrong credentials");
+      return;
+    }
+    Serial.printf("Firmware upload: %s\n", upload.filename.c_str());
+    if (!Update.begin(UPDATE_SIZE_UNKNOWN))
+    {
+      Update.printError(Serial);
+    }
+    break;
+  case UPLOAD_FILE_WRITE:
+    if (updateAuthorized && Update.isRunning() && Update.write(upload.buf, upload.currentSize) != upload.currentSize)
+    {
+      Update.printError(Serial);
+    }
+    break;
+  case UPLOAD_FILE_END:
+    if (updateAuthorized && Update.isRunning())
+    {
+      updateOk = Update.end(true);
+      if (!updateOk)
+      {
+        Update.printError(Serial);
+      }
+    }
+    break;
+  case UPLOAD_FILE_ABORTED:
+    if (Update.isRunning())
+    {
+      Update.abort();
+    }
+    break;
+  default:
+    break;
+  }
+}
+
+static void HandleFirmwareUploadDone()
+{
+  WebServer &server = *wm.server;
+  if (updateOk)
+  {
+    server.send(200, "text/html",
+                "<meta http-equiv='refresh' content='15;url=/'>Firmware actualizado. Reiniciando...");
+    Serial.println("Firmware updated, restarting");
+    delay(1000);
+    ESP.restart();
+  }
+  else
+  {
+    server.send(500, "text/plain", String("Error al actualizar el firmware: ") + Update.errorString());
+  }
+}
+
+static void SetupWebServer()
+{
+  WebServer &server = *wm.server;
+  // Every page asks for the user and password
+  server.addMiddleware([](WebServer &server, Middleware::Callback next) {
+    if (!Authorized(server))
+    {
+      server.requestAuthentication(BASIC_AUTH, DEVICE_NAME);
+      return true;
+    }
+    return next();
+  });
+  // Registered before the handlers of WiFiManager, so it replaces its unprotected upload handler.
+  // The update page of WiFiManager (/update) posts here.
+  server.on("/u", HTTP_POST, HandleFirmwareUploadDone, HandleFirmwareUpload);
+}
+
 static void SetupPortal()
 {
   static bool done = false;
@@ -220,8 +321,8 @@ static void SetupPortal()
   wm.addParameter(p_ca);
   wm.addParameter(p_ca_clear);
 
-  static const char *menu[] = {"wifi", "param", "info", "restart"};
-  wm.setMenu(menu, 4);
+  static const char *menu[] = {"wifi", "param", "info", "update", "restart"};
+  wm.setMenu(menu, 5);
   wm.setParamsPage(true); // MQTT on its own page, so it can be changed without touching the WiFi
   wm.setTitle(DEVICE_NAME);
   wm.setShowInfoUpdate(false);
@@ -230,6 +331,7 @@ static void SetupPortal()
   wm.setBreakAfterConfig(true);
   wm.setSaveParamsCallback(OnParamsSaved);
   wm.setSaveConfigCallback([]() { saved = true; }); // New WiFi
+  wm.setWebServerCallback(SetupWebServer);           // Runs every time the web server is (re)created
 }
 
 void StartConfigPortal(bool closeAfterTimeout)
@@ -239,6 +341,10 @@ void StartConfigPortal(bool closeAfterTimeout)
     return;
   }
   SetupPortal();
+  if (wm.getWebPortalActive())
+  {
+    wm.stopWebPortal(); // Both use port 80
+  }
   wm.setConfigPortalTimeout(closeAfterTimeout ? PORTAL_TIMEOUT_S : 0);
   Serial.printf("Configuration portal open: WiFi \"%s\", http://192.168.4.1\n", PORTAL_SSID);
   wm.startConfigPortal(PORTAL_SSID, PORTAL_PASSWORD);
@@ -251,10 +357,15 @@ bool ConfigPortalActive()
 
 bool HandleConfigPortal()
 {
-  if (wm.getConfigPortalActive())
+  // Web pages always available on the home network, except while the access point portal is open
+  if (!wm.getConfigPortalActive() && !wm.getWebPortalActive() && WiFi.isConnected())
   {
-    wm.process();
+    SetupPortal();
+    wm.setConfigPortalTimeout(0); // The web portal shares this timeout: never close it
+    wm.startWebPortal();
+    Serial.printf("Web pages: http://%s (user \"%s\")\n", WiFi.localIP().toString().c_str(), WEB_USER);
   }
+  wm.process();
   return saved;
 }
 

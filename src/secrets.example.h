@@ -7,3 +7,8 @@
 
 // Password asked for firmware updates over WiFi. Leave undefined for no password.
 // #define OTA_PASSWORD "password"
+
+// User and password of the web pages (configuration and firmware update).
+// If WEB_PASSWORD is not defined, PORTAL_PASSWORD is used.
+// #define WEB_USER "admin"
+// #define WEB_PASSWORD "password"

@@ -30,7 +30,11 @@ The buses can be swapped with `INVERTER_ON_ONBOARD_PORT` in `src/config.h`.
    * **Setup**: MQTT broker, port, user, password, TLS and, only for a self-signed broker certificate, its CA in PEM.
 4. The device restarts with the new settings.
 
-To change the settings later, open the portal again by holding the BOOT button for 3 seconds or with the
+Once connected to the WiFi, the same pages are always available at the IP of the device (user `admin`, password
+`WEB_PASSWORD` or, if it is not defined, `PORTAL_PASSWORD` from `secrets.h`). From there the settings can be changed and
+the firmware can be updated: **Update** page, file `.pio/build/esp32s3/firmware.bin`.
+
+To configure a new WiFi network, open the access point again by holding the BOOT button for 3 seconds or with the
 "Abrir portal de configuración" button in Home Assistant. It closes itself after 10 minutes, and the meters keep
 being read while it is open.
 
