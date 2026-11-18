@@ -47,7 +47,7 @@
 #define INVERTER_MODBUS_ID 0x01
 
 // ---------- Grid meter (DDSU666) ----------
-#define MAX_EXPORT 5     // kW, readings above this are discarded
+#define MAX_EXPORT 6     // kW, readings above this are discarded (inverter is 5 kW)
 #define MAX_IMPORT 10    // kW, readings above this are discarded
 #define DDSU_FRAME_LEN 9 // 01 03 04 + 4 bytes float + 2 bytes CRC
 
